@@ -1,5 +1,8 @@
 import os
 import subprocess
+import threading
+import webbrowser
+from tkinter import Tk, Label, Button
 from flask import Flask, request, render_template_string, jsonify
 
 app = Flask(__name__)
@@ -131,7 +134,7 @@ def send_message(message, all_chat):
     }}
     ExitApp
     """
-    ahk_temp_file = 'temp_send_message.ahk'
+    ahk_temp_file = 'temp_send_message.exe'
     with open(ahk_temp_file, 'wb') as file:
         # Write the BOM for UTF-8
         file.write(b'\xef\xbb\xbf')
@@ -150,5 +153,37 @@ def send():
     send_message(message, all_chat)
     return jsonify({'message': 'Message sent!'})
 
-if __name__ == "__main__":
+def start_server():
     app.run(host='0.0.0.0', port=5000)
+
+def open_browser():
+    webbrowser.open('http://localhost:5000')
+
+def start_flask():
+    flask_thread = threading.Thread(target=start_server)
+    flask_thread.start()
+
+def stop_flask():
+    os._exit(0)
+
+def create_gui():
+    window = Tk()
+    window.title("League Chat Sender")
+    window.geometry("300x150")
+
+    url_label = Label(window, text="URL: http://localhost:5000")
+    url_label.pack(pady=10)
+
+    start_button = Button(window, text="Start Server", command=start_flask)
+    start_button.pack(pady=5)
+
+    open_button = Button(window, text="Open in Browser", command=open_browser)
+    open_button.pack(pady=5)
+
+    stop_button = Button(window, text="Stop Server", command=stop_flask)
+    stop_button.pack(pady=5)
+
+    window.mainloop()
+
+if __name__ == "__main__":
+    create_gui()

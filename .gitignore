@@ -7,3 +7,4 @@ __pycache__/
 main.spec
 Ahk2Exe.exe
 message_profiles/
+server.spec
