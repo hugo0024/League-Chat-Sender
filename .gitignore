@@ -1,0 +1,9 @@
+.env
+*.json
+.vs/
+build/
+dist/
+__pycache__/
+main.spec
+Ahk2Exe.exe
+message_profiles/

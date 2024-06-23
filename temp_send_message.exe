@@ -1,0 +1,12 @@
+﻿
+    #Persistent
+    SetTitleMatchMode, 2
+    IfWinExist, League of Legends
+    {
+    WinActivate
+    Send, {Enter}
+    Send, /all 早點睡吧
+    Send, {Enter}
+    }
+    ExitApp
+    
