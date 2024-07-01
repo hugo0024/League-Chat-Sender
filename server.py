@@ -1,9 +1,14 @@
 import os
-import subprocess
 import threading
 import webbrowser
 from tkinter import Tk, Label, Button
 from flask import Flask, request, render_template_string, jsonify
+import ctypes
+import time
+import pygetwindow as gw
+import pywinauto
+import atexit
+import socket
 
 app = Flask(__name__)
 
@@ -112,6 +117,7 @@ html_template = """
             data: $(this).serialize(),
             success: function(response) {
               $('#responseMessage').text(response.message);
+              $('#message').val('');  // Clear the message input field
             }
           });
         });
@@ -121,26 +127,79 @@ html_template = """
 </html>
 """
 
+# C struct redefinitions
+PUL = ctypes.POINTER(ctypes.c_ulong)
+
+class KeyBdInput(ctypes.Structure):
+    _fields_ = [("wVk", ctypes.c_ushort),
+                ("wScan", ctypes.c_ushort),
+                ("dwFlags", ctypes.c_ulong),
+                ("time", ctypes.c_ulong),
+                ("dwExtraInfo", PUL)]
+
+class HardwareInput(ctypes.Structure):
+    _fields_ = [("uMsg", ctypes.c_ulong),
+                ("wParamL", ctypes.c_short),
+                ("wParamH", ctypes.c_ushort)]
+
+class MouseInput(ctypes.Structure):
+    _fields_ = [("dx", ctypes.c_long),
+                ("dy", ctypes.c_long),
+                ("mouseData", ctypes.c_ulong),
+                ("dwFlags", ctypes.c_ulong),
+                ("time",ctypes.c_ulong),
+                ("dwExtraInfo", PUL)]
+
+class Input_I(ctypes.Union):
+    _fields_ = [("ki", KeyBdInput),
+                ("mi", MouseInput),
+                ("hi", HardwareInput)]
+
+class Input(ctypes.Structure):
+    _fields_ = [("type", ctypes.c_ulong),
+                ("ii", Input_I)]
+
+# Actual Functions
+def press_key(hexKeyCode):
+    extra = ctypes.c_ulong(0)
+    ii_ = Input_I()
+    ii_.ki = KeyBdInput(0, hexKeyCode, 0x0008, 0, ctypes.pointer(extra))
+    x = Input(ctypes.c_ulong(1), ii_)
+    ctypes.windll.user32.SendInput(1, ctypes.pointer(x), ctypes.sizeof(x))
+
+def release_key(hexKeyCode):
+    extra = ctypes.c_ulong(0)
+    ii_ = Input_I()
+    ii_.ki = KeyBdInput(0, hexKeyCode, 0x0008 | 0x0002, 0, ctypes.pointer(extra))
+    x = Input(ctypes.c_ulong(1), ii_)
+    ctypes.windll.user32.SendInput(1, ctypes.pointer(x), ctypes.sizeof(x))
+
 def send_message(message, all_chat):
-    ahk_script = f"""
-    #Persistent
-    SetTitleMatchMode, 2
-    IfWinExist, League of Legends
-    {{
-        WinActivate
-        Send, {{Enter}}
-        Send, {'/all ' if all_chat else ''}{message}
-        Send, {{Enter}}
-    }}
-    ExitApp
-    """
-    ahk_temp_file = 'temp_send_message.exe'
-    with open(ahk_temp_file, 'wb') as file:
-        # Write the BOM for UTF-8
-        file.write(b'\xef\xbb\xbf')
-        # Write the rest of the script in UTF-8
-        file.write(ahk_script.encode('utf-8'))
-    subprocess.Popen(['C:\\Program Files\\AutoHotkey\\v1.1.37.01\\AutoHotkeyU64.exe', ahk_temp_file])
+    # Find the League of Legends window
+    windows = gw.getWindowsWithTitle('League of Legends')
+    if windows:
+        league_window = windows[0]
+        # Ensure the window is activated
+        league_window.activate()
+        time.sleep(0.1)  # Add a small delay to ensure the window is focused
+        app = pywinauto.Application().connect(handle=league_window._hWnd)
+        window = app.window(handle=league_window._hWnd)
+        window.set_focus()
+        
+        # Open chat
+        window.type_keys('{ENTER}', with_spaces=True, pause=0.01)
+        
+        # Type /all if all_chat is enabled
+        if all_chat:
+            window.type_keys('/all ', with_spaces=True, pause=0.01)
+        
+        # Type the message
+        window.type_keys(message, with_spaces=True, pause=0.01)
+        
+        # Send the message
+        window.type_keys('{ENTER}', with_spaces=True, pause=0.01)
+    else:
+        print("League of Legends window not found.")
 
 @app.route('/')
 def index():
@@ -160,30 +219,60 @@ def open_browser():
     webbrowser.open('http://localhost:5000')
 
 def start_flask():
+    global flask_thread
     flask_thread = threading.Thread(target=start_server)
     flask_thread.start()
 
 def stop_flask():
     os._exit(0)
 
+def toggle_server(button):
+    if button["text"] == "Start Server":
+        start_flask()
+        button["text"] = "Stop Server"
+    else:
+        stop_flask()
+        button["text"] = "Start Server"
+
+def on_closing():
+    stop_flask()
+    window.destroy()
+
+def get_local_network_ip():
+    hostname = socket.gethostname()
+    ip_addresses = socket.gethostbyname_ex(hostname)[2]
+    local_network_ips = [ip for ip in ip_addresses if not ip.startswith("127.")]
+    return local_network_ips
+
 def create_gui():
+    global window
     window = Tk()
     window.title("League Chat Sender")
-    window.geometry("300x150")
+    window.geometry("300x200")
 
     url_label = Label(window, text="URL: http://localhost:5000")
     url_label.pack(pady=10)
 
-    start_button = Button(window, text="Start Server", command=start_flask)
-    start_button.pack(pady=5)
+    local_network_ips = get_local_network_ip()
+    if local_network_ips:
+        ip_urls = "\n".join([f"Running on http://{ip}:5000" for ip in local_network_ips])
+    else:
+        ip_urls = "No local network IP found."
+    ip_label = Label(window, text=ip_urls, justify="left")
+    ip_label.pack(pady=10)
+
+    toggle_button = Button(window, text="Start Server", command=lambda: toggle_server(toggle_button))
+    toggle_button.pack(pady=5)
 
     open_button = Button(window, text="Open in Browser", command=open_browser)
     open_button.pack(pady=5)
 
-    stop_button = Button(window, text="Stop Server", command=stop_flask)
-    stop_button.pack(pady=5)
+    window.after(1000, lambda: toggle_server(toggle_button))  # Start the server automatically after 1 second
+
+    window.protocol("WM_DELETE_WINDOW", on_closing)  # Handle window close event
 
     window.mainloop()
 
 if __name__ == "__main__":
+    atexit.register(stop_flask)  # Ensure the server stops when the program exits
     create_gui()
